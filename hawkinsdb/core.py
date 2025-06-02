@@ -205,3 +205,77 @@ class HawkinsDB:
             return sorted(list(self.name_index.keys()))
         except Exception:
             return []
+
+    def update_entity(self, column_name: str, frame_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an entity in storage and in-memory."""
+        logger.info(f"Attempting to update entity '{frame_name}' in column '{column_name}' with data: {data}")
+
+        # Filter data to only include allowed frame attributes for storage update
+        allowed_storage_keys = {'properties', 'relationships', 'location'}
+        storage_data = {k: v for k, v in data.items() if k in allowed_storage_keys}
+
+        if not storage_data:
+            logger.warning(f"No valid fields (properties, relationships, location) provided for updating entity '{frame_name}'.")
+            # Even if no direct attributes are updated, the storage method might update 'updated_at'
+            # Proceed to call storage.update_entity to ensure 'updated_at' is handled.
+
+        try:
+            update_successful = self.storage.update_entity(column_name, frame_name, storage_data)
+
+            if update_successful:
+                # Update in-memory self.columns
+                if column_name in self.columns:
+                    column_data = self.columns[column_name]
+                    updated_frame_in_memory = False
+                    for i, frame in enumerate(column_data.get("frames", [])):
+                        if frame["name"] == frame_name:
+                            if 'properties' in data:
+                                frame['properties'] = data['properties']
+                            if 'relationships' in data:
+                                frame['relationships'] = data['relationships']
+                            if 'location' in data:
+                                frame['location'] = data['location']
+                            frame['updated_at'] = datetime.now().isoformat() # Update timestamp
+                            column_data["frames"][i] = frame
+                            updated_frame_in_memory = True
+                            logger.info(f"In-memory frame '{frame_name}' in column '{column_name}' updated.")
+                            break
+                    
+                    if not updated_frame_in_memory:
+                        logger.warning(f"Frame '{frame_name}' not found in-memory in column '{column_name}' for update, though storage succeeded.")
+
+                    # Update in-memory self.name_index
+                    frame_name_lower = frame_name.lower()
+                    if frame_name_lower in self.name_index:
+                        updated_frame_in_index = False
+                        for i, (col_name_idx, frame_idx) in enumerate(self.name_index[frame_name_lower]):
+                            if col_name_idx == column_name and frame_idx["name"] == frame_name:
+                                if 'properties' in data:
+                                    frame_idx['properties'] = data['properties']
+                                if 'relationships' in data:
+                                    frame_idx['relationships'] = data['relationships']
+                                if 'location' in data:
+                                    frame_idx['location'] = data['location']
+                                frame_idx['updated_at'] = datetime.now().isoformat() # Update timestamp
+                                self.name_index[frame_name_lower][i] = (col_name_idx, frame_idx)
+                                updated_frame_in_index = True
+                                logger.info(f"In-memory name_index for '{frame_name}' updated.")
+                                break
+                        if not updated_frame_in_index:
+                             logger.warning(f"Frame '{frame_name}' not found in-memory name_index for update, though storage succeeded and column was updated.")
+                    else:
+                        logger.warning(f"Frame '{frame_name}' not found in name_index at all.")
+
+                else:
+                    logger.warning(f"Column '{column_name}' not found in-memory for updating frame '{frame_name}', though storage succeeded.")
+
+                # self._save() # Decided against calling this as per reasoning in plan
+                logger.info(f"Entity '{frame_name}' in column '{column_name}' updated successfully in storage and in-memory.")
+                return {"success": True, "message": "Entity updated successfully."}
+            else:
+                logger.warning(f"Storage update failed for entity '{frame_name}' in column '{column_name}'.")
+                return {"success": False, "message": "Entity not found or update failed in storage."}
+
+        except Exception as e:
+            logger.error(f"Error during entity update for '{frame_name}' in '{column_name}': {str(e)}")
+            return {"success": False, "message": f"An unexpected error occurred: {str(e)}"}

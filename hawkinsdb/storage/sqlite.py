@@ -257,3 +257,67 @@ class SQLiteStorage:
     def cleanup(self) -> None:
         """Clean up resources."""
         logger.info("SQLite storage cleaned up successfully")
+
+    def update_entity(self, column_name: str, frame_name: str, data: Dict[str, Any]) -> bool:
+        """Update an entity's properties, relationships, and location."""
+        if not self._initialized:
+            logger.error("Storage not initialized. Cannot update entity.")
+            raise RuntimeError("Storage not initialized")
+
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+
+                # Get column_id
+                cursor.execute("SELECT id FROM columns WHERE name = ?", (column_name,))
+                column_row = cursor.fetchone()
+                if not column_row:
+                    logger.warning(f"Column '{column_name}' not found. Cannot update entity '{frame_name}'.")
+                    return False
+                column_id = column_row['id']
+
+                # Construct SET part of the query
+                set_clauses = []
+                params = []
+                
+                if 'properties' in data:
+                    set_clauses.append("properties = ?")
+                    params.append(json.dumps(data['properties']))
+                
+                if 'relationships' in data:
+                    set_clauses.append("relationships = ?")
+                    params.append(json.dumps(data['relationships']))
+
+                if 'location' in data:
+                    set_clauses.append("location = ?")
+                    params.append(json.dumps(data['location']))
+                
+                if not set_clauses:
+                    logger.info(f"No data provided to update for entity '{frame_name}' in column '{column_name}'.")
+                    # Still update updated_at
+                    set_clauses.append("updated_at = ?")
+                    params.append(datetime.now().isoformat())
+                else:
+                    set_clauses.append("updated_at = ?")
+                    params.append(datetime.now().isoformat())
+
+                sql_query = f"UPDATE frames SET {', '.join(set_clauses)} WHERE column_id = ? AND name = ?"
+                params.extend([column_id, frame_name])
+
+                cursor.execute(sql_query, tuple(params))
+                conn.commit()
+
+                if cursor.rowcount > 0:
+                    logger.info(f"Successfully updated entity '{frame_name}' in column '{column_name}'.")
+                    return True
+                else:
+                    logger.warning(f"Entity '{frame_name}' in column '{column_name}' not found or no changes made.")
+                    return False
+
+        except sqlite3.Error as e:
+            logger.error(f"SQLite error updating entity '{frame_name}' in column '{column_name}': {e}")
+            # conn.rollback() # Not needed as context manager handles it
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error updating entity '{frame_name}' in column '{column_name}': {e}")
+            return False
