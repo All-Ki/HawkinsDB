@@ -279,3 +279,88 @@ class HawkinsDB:
         except Exception as e:
             logger.error(f"Error during entity update for '{frame_name}' in '{column_name}': {str(e)}")
             return {"success": False, "message": f"An unexpected error occurred: {str(e)}"}
+
+    def add_or_update_entity(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Adds an entity if it doesn't exist, or updates it if it does.
+        The determination of existence is based on frame_name within a specific column_name.
+        """
+        column_name = data.get("column", "Semantic")  # Default to Semantic
+        frame_name = data.get("name")
+
+        if not frame_name:
+            logger.warning("Attempted to add or update entity without a name.")
+            return {"success": False, "action": "error", "message": "Entity name is required."}
+
+        logger.info(f"Processing add_or_update for entity '{frame_name}' in column '{column_name}'.")
+
+        entity_exists = False
+        try:
+            # query_frames returns a dict like {'ColumnName': ReferenceFrame_object}
+            existing_frames_by_column = self.query_frames(frame_name)
+            if column_name in existing_frames_by_column and existing_frames_by_column[column_name] is not None:
+                # Further check if the frame object itself indicates it's valid, if necessary.
+                # For now, presence in the correct column implies existence.
+                entity_exists = True
+                logger.info(f"Entity '{frame_name}' found in column '{column_name}'. Preparing for update.")
+            else:
+                logger.info(f"Entity '{frame_name}' not found in column '{column_name}'. Preparing for add.")
+        except Exception as e:
+            logger.error(f"Error querying frames during add_or_update for '{frame_name}': {str(e)}")
+            return {"success": False, "action": "error", "entity_name": frame_name, "message": f"Error checking entity existence: {str(e)}"}
+
+
+        if entity_exists:
+            update_payload = {
+                k: v for k, v in data.items() if k in ['properties', 'relationships', 'location']
+            }
+            logger.debug(f"Update payload for '{frame_name}': {update_payload}")
+            try:
+                result = self.update_entity(column_name, frame_name, update_payload)
+                if result.get("success"):
+                    logger.info(f"Successfully updated entity '{frame_name}' in column '{column_name}'.")
+                    return {
+                        "success": True,
+                        "action": "updated",
+                        "entity_name": frame_name,
+                        "message": f"Successfully updated {column_name} memory: {frame_name}"
+                    }
+                else:
+                    logger.error(f"Failed to update entity '{frame_name}': {result.get('message')}")
+                    return {
+                        "success": False,
+                        "action": "error", # Or "update_failed"
+                        "entity_name": frame_name,
+                        "message": f"Error updating entity: {result.get('message', 'Unknown error during update.')}"
+                    }
+            except Exception as e:
+                logger.exception(f"Unexpected error during update_entity call for '{frame_name}': {str(e)}")
+                return {"success": False, "action": "error", "entity_name": frame_name, "message": f"Unexpected error updating entity: {str(e)}"}
+        else:
+            logger.debug(f"Adding new entity '{frame_name}' with data: {data}")
+            try:
+                # The `add_entity` method expects the full data dictionary, including 'column' and 'name'.
+                result = self.add_entity(data) 
+                if result.get("success"):
+                    # add_entity uses lowercase name in its success message, let's be consistent or use original frame_name
+                    logger.info(f"Successfully added entity '{frame_name}' to column '{column_name}'.")
+                    return {
+                        "success": True,
+                        "action": "added",
+                        "entity_name": result.get("entity_name", frame_name.lower()), # Use name from add_entity result
+                        "message": f"Successfully added {column_name} memory: {frame_name}"
+                    }
+                else:
+                    logger.error(f"Failed to add entity '{frame_name}': {result.get('message')}")
+                    return {
+                        "success": False,
+                        "action": "error", # Or "add_failed"
+                        "entity_name": frame_name,
+                        "message": f"Error adding entity: {result.get('message', 'Unknown error during add.')}"
+                    }
+            except EntityValidationError as e:
+                logger.error(f"Validation error adding entity '{frame_name}': {str(e)}")
+                return {"success": False, "action": "error", "entity_name": frame_name, "message": f"Validation error: {str(e)}"}
+            except Exception as e:
+                logger.exception(f"Unexpected error during add_entity call for '{frame_name}': {str(e)}")
+                return {"success": False, "action": "error", "entity_name": frame_name, "message": f"Unexpected error adding entity: {str(e)}"}
