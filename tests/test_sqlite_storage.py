@@ -117,5 +117,126 @@ class TestSQLiteStorage(unittest.TestCase):
                     SQLiteStorage(db_path=db_path)
                 self.assertIn("write", str(cm.exception).lower())
 
+    def test_update_entity(self):
+        """Test updating an entity in SQLiteStorage."""
+        import sqlite3
+        import json
+        import time
+
+        # Initial data
+        column_name = "TestColumn"
+        frame_name = "TestFrame"
+        initial_properties = {"feature": "initial_value", "color": "blue"}
+        initial_relationships = {"connected_to": "another_frame"}
+        initial_location = {"x": 10, "y": 20}
+        created_at_dt = datetime.now()
+        created_at_iso = created_at_dt.isoformat()
+        # Ensure updated_at is slightly different if possible, or same for simplicity in setup
+        updated_at_iso = created_at_dt.isoformat() 
+
+        # 1. Setup: Add a column and a frame directly
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO columns (name, created_at, updated_at) VALUES (?, ?, ?)",
+                               (column_name, created_at_iso, updated_at_iso))
+                column_id = cursor.lastrowid
+                cursor.execute("""
+                    INSERT INTO frames (name, column_id, properties, relationships, location, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (frame_name, column_id, json.dumps(initial_properties), json.dumps(initial_relationships),
+                      json.dumps(initial_location), created_at_iso, updated_at_iso))
+                conn.commit()
+        except sqlite3.Error as e:
+            self.fail(f"DB setup failed: {e}")
+
+        # Allow a small delay to ensure timestamps can differ
+        time.sleep(0.01)
+
+        # 2. Test successful update
+        update_data = {
+            "properties": {"feature": "updated_value", "size": 30},
+            "relationships": {"connected_to": "new_frame", "sibling_of": "frame_b"},
+            "location": {"x": 15, "y": 25, "z": 5}
+        }
+        self.assertTrue(self.storage.update_entity(column_name, frame_name, update_data), "Update_entity should succeed.")
+
+        # Verify update in DB
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT f.properties, f.relationships, f.location, f.updated_at
+                FROM frames f
+                JOIN columns c ON f.column_id = c.id
+                WHERE c.name = ? AND f.name = ?
+            """, (column_name, frame_name))
+            row = cursor.fetchone()
+            self.assertIsNotNone(row, "Updated frame should exist.")
+            self.assertEqual(json.loads(row["properties"]), update_data["properties"])
+            self.assertEqual(json.loads(row["relationships"]), update_data["relationships"])
+            self.assertEqual(json.loads(row["location"]), update_data["location"])
+            self.assertGreater(row["updated_at"], updated_at_iso, "updated_at should be newer.")
+            original_updated_at_for_next_test = row["updated_at"]
+
+        # 3. Test update with empty data (should only update updated_at)
+        time.sleep(0.01)
+        empty_update_data = {}
+        self.assertTrue(self.storage.update_entity(column_name, frame_name, empty_update_data), "Update with empty data should succeed.")
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT properties, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)", 
+                           (frame_name, column_name))
+            row = cursor.fetchone()
+            self.assertIsNotNone(row)
+            # Properties should remain unchanged from the previous update
+            self.assertEqual(json.loads(row["properties"]), update_data["properties"]) 
+            self.assertGreater(row["updated_at"], original_updated_at_for_next_test, "updated_at should be newer after empty update.")
+
+        # 4. Test update of only one field (e.g., properties)
+        time.sleep(0.01)
+        partial_update_data = {"properties": {"feature": "final_value"}}
+        self.assertTrue(self.storage.update_entity(column_name, frame_name, partial_update_data))
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT properties, relationships, location, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)", 
+                           (frame_name, column_name))
+            row = cursor.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(json.loads(row["properties"]), partial_update_data["properties"])
+             # Relationships and location should remain from the first successful update_data
+            self.assertEqual(json.loads(row["relationships"]), update_data["relationships"])
+            self.assertEqual(json.loads(row["location"]), update_data["location"])
+            self.assertGreater(row["updated_at"], original_updated_at_for_next_test)
+
+
+        # 5. Test update for non-existent frame
+        self.assertFalse(self.storage.update_entity(column_name, "NonExistentFrame", update_data), "Update for non-existent frame should fail.")
+
+        # 6. Test update for frame in non-existent column
+        self.assertFalse(self.storage.update_entity("NonExistentColumn", frame_name, update_data), "Update for non-existent column should fail.")
+
+        # 7. Test update with only some fields in data
+        time.sleep(0.01)
+        another_partial_update = {"location": {"x": 100}}
+        last_updated_at = row["updated_at"] # from previous fetch
+        self.assertTrue(self.storage.update_entity(column_name, frame_name, another_partial_update))
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT properties, relationships, location, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)", 
+                           (frame_name, column_name))
+            row = cursor.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(json.loads(row["properties"]), partial_update_data["properties"]) # from previous partial
+            self.assertEqual(json.loads(row["relationships"]), update_data["relationships"]) # from first update
+            self.assertEqual(json.loads(row["location"]), another_partial_update["location"]) # newly updated
+            self.assertGreater(row["updated_at"], last_updated_at)
+
+
 if __name__ == '__main__':
     unittest.main()
