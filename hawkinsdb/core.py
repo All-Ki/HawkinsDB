@@ -5,6 +5,7 @@ import time
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Any, List # Added List for general use, though not strictly necessary for current diff
 from .base import PropertyCandidate, ReferenceFrame, CorticalColumn
 
 # Configure logging
@@ -240,7 +241,7 @@ class HawkinsDB:
                             updated_frame_in_memory = True
                             logger.info(f"In-memory frame '{frame_name}' in column '{column_name}' updated.")
                             break
-                    
+
                     if not updated_frame_in_memory:
                         logger.warning(f"Frame '{frame_name}' not found in-memory in column '{column_name}' for update, though storage succeeded.")
 
@@ -340,7 +341,7 @@ class HawkinsDB:
             logger.debug(f"Adding new entity '{frame_name}' with data: {data}")
             try:
                 # The `add_entity` method expects the full data dictionary, including 'column' and 'name'.
-                result = self.add_entity(data) 
+                result = self.add_entity(data)
                 if result.get("success"):
                     # add_entity uses lowercase name in its success message, let's be consistent or use original frame_name
                     logger.info(f"Successfully added entity '{frame_name}' to column '{column_name}'.")

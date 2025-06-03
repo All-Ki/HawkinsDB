@@ -40,7 +40,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         query_result = self.db.query_frames("TestEntity1")
         self.assertIn("Semantic", query_result)
         queried_frame = query_result["Semantic"]
-        
+
         self.assertEqual(queried_frame.name, "TestEntity1")
         # Properties in ReferenceFrame are lists of PropertyCandidate
         self.assertEqual(queried_frame.properties["color"][0].value, "red")
@@ -53,7 +53,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         """Test the update_entity functionality in HawkinsDB."""
         column_name = "Episodic" # Using one of the default columns
         entity_name = "TestEvent"
-        
+
         initial_entity_data = {
             "column": column_name,
             "name": entity_name,
@@ -61,19 +61,19 @@ class TestHawkinsDBCore(unittest.TestCase):
             "relationships": {"attendee": "John Doe"},
             "location": {"room": "Conference Room 1"}
         }
-        
+
         add_result = self.db.add_entity(initial_entity_data)
         self.assertTrue(add_result.get("success"), f"Add entity failed: {add_result.get('message')}")
 
         # Allow a small delay to ensure timestamps can differ if updated
         time.sleep(0.01)
-        
+
         update_data = {
             "properties": {"type": "workshop", "duration": 120, "status": "completed"},
             "relationships": {"attendee": ["John Doe", "Jane Smith"]}, # Update relationship
             "location": {"room": "Workshop Room 3"}
         }
-        
+
         # --- Test successful update ---
         update_result = self.db.update_entity(column_name, entity_name, update_data)
         self.assertTrue(update_result["success"], f"Update failed: {update_result.get('message')}")
@@ -94,7 +94,7 @@ class TestHawkinsDBCore(unittest.TestCase):
 
         self.assertEqual(updated_frame_queried.relationships["attendee"][0].value, ["John Doe", "Jane Smith"])
         self.assertEqual(updated_frame_queried.location["room"], "Workshop Room 3")
-        
+
         # Verify updated_at timestamp (it should be different from created_at)
         # Need to access raw frame data for created_at vs updated_at
         raw_frame_in_cols = None
@@ -106,7 +106,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         self.assertIn("created_at", raw_frame_in_cols)
         self.assertIn("updated_at", raw_frame_in_cols)
         if raw_frame_in_cols["created_at"] and raw_frame_in_cols["updated_at"]: # Ensure they exist
-             self.assertGreater(raw_frame_in_cols["updated_at"], raw_frame_in_cols["created_at"], 
+             self.assertGreater(raw_frame_in_cols["updated_at"], raw_frame_in_cols["created_at"],
                                "updated_at should be greater than created_at after update.")
         original_updated_at = raw_frame_in_cols["updated_at"]
 
@@ -132,7 +132,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         partial_update = {"location": {"room": "Main Hall", "floor": 1}}
         update_result_partial = self.db.update_entity(column_name, entity_name, partial_update)
         self.assertTrue(update_result_partial["success"])
-        
+
         queried_frames_partial = self.db.query_frames(entity_name)
         updated_frame_partial_queried = queried_frames_partial[column_name]
         self.assertEqual(updated_frame_partial_queried.location["room"], "Main Hall")
@@ -196,7 +196,7 @@ class TestHawkinsDBCore(unittest.TestCase):
             "relationships": {"related_to": "something"},
             "location": {"source": "test_add"}
         }
-        
+
         result_add = self.db.add_or_update_entity(entity_data_initial)
         self.assertTrue(result_add.get("success"), f"Add failed: {result_add.get('message')}")
         self.assertEqual(result_add.get("action"), "added")
@@ -211,7 +211,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         self.assertEqual(frame_after_add.properties["status"][0].value, "initial")
         self.assertEqual(frame_after_add.relationships["related_to"][0].value, "something")
         self.assertEqual(frame_after_add.location["source"], "test_add")
-        
+
         # Store created_at for later comparison with updated_at
         raw_frame_after_add = None
         for frame_dict in self.db.columns[column_name]["frames"]:
@@ -227,7 +227,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         # The core add_entity doesn't explicitly set created_at/updated_at, it relies on storage or _save.
         # _save in JSONStorage sets them if not present. SQLiteStorage sets them on insert.
         # So, after add, created_at and updated_at from storage should exist.
-        
+
         # 2. Test "update" functionality
         time.sleep(0.01) # Ensure timestamp difference for updated_at
         updated_properties = {"value": 200, "status": "updated", "new_prop": "added_during_update"}
@@ -287,7 +287,7 @@ class TestHawkinsDBCore(unittest.TestCase):
         # 4. Test EntityValidationError handling (for Episodic missing timestamp on add)
         bad_episodic_data = {"name": "BadEpisodic", "column": "Episodic", "properties": {"detail": "missing timestamp"}}
         result_validation_error = self.db.add_or_update_entity(bad_episodic_data)
-        
+
         self.assertFalse(result_validation_error.get("success"))
         self.assertEqual(result_validation_error.get("action"), "error")
         self.assertIn("Validation error", result_validation_error.get("message", ""))

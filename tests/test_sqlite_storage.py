@@ -132,7 +132,7 @@ class TestSQLiteStorage(unittest.TestCase):
         created_at_dt = datetime.now()
         created_at_iso = created_at_dt.isoformat()
         # Ensure updated_at is slightly different if possible, or same for simplicity in setup
-        updated_at_iso = created_at_dt.isoformat() 
+        updated_at_iso = created_at_dt.isoformat()
 
         # 1. Setup: Add a column and a frame directly
         try:
@@ -183,27 +183,27 @@ class TestSQLiteStorage(unittest.TestCase):
         time.sleep(0.01)
         empty_update_data = {}
         self.assertTrue(self.storage.update_entity(column_name, frame_name, empty_update_data), "Update with empty data should succeed.")
-        
+
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT properties, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)", 
+            cursor.execute("SELECT properties, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)",
                            (frame_name, column_name))
             row = cursor.fetchone()
             self.assertIsNotNone(row)
             # Properties should remain unchanged from the previous update
-            self.assertEqual(json.loads(row["properties"]), update_data["properties"]) 
+            self.assertEqual(json.loads(row["properties"]), update_data["properties"])
             self.assertGreater(row["updated_at"], original_updated_at_for_next_test, "updated_at should be newer after empty update.")
 
         # 4. Test update of only one field (e.g., properties)
         time.sleep(0.01)
         partial_update_data = {"properties": {"feature": "final_value"}}
         self.assertTrue(self.storage.update_entity(column_name, frame_name, partial_update_data))
-        
+
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT properties, relationships, location, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)", 
+            cursor.execute("SELECT properties, relationships, location, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)",
                            (frame_name, column_name))
             row = cursor.fetchone()
             self.assertIsNotNone(row)
@@ -228,7 +228,7 @@ class TestSQLiteStorage(unittest.TestCase):
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            cursor.execute("SELECT properties, relationships, location, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)", 
+            cursor.execute("SELECT properties, relationships, location, updated_at FROM frames WHERE name = ? AND column_id = (SELECT id FROM columns WHERE name = ?)",
                            (frame_name, column_name))
             row = cursor.fetchone()
             self.assertIsNotNone(row)

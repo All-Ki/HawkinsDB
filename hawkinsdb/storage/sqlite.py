@@ -259,65 +259,90 @@ class SQLiteStorage:
         logger.info("SQLite storage cleaned up successfully")
 
     def update_entity(self, column_name: str, frame_name: str, data: Dict[str, Any]) -> bool:
-        """Update an entity's properties, relationships, and location."""
+        """
+        Update an entity's properties, relationships, location, and updated_at timestamp.
+        """
         if not self._initialized:
             logger.error("Storage not initialized. Cannot update entity.")
-            raise RuntimeError("Storage not initialized")
+            # Per instructions, raise RuntimeError or return False. Returning False for consistency.
+            return False
 
+        conn = None  # Initialize conn to None for the finally block
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
+            conn = self.get_connection()
+            # Explicitly begin transaction.
+            # Using 'DEFERRED' means the lock is not acquired until the first read/write.
+            # 'IMMEDIATE' would acquire a reserved lock immediately.
+            # 'EXCLUSIVE' would acquire an exclusive lock immediately.
+            # For this operation, default transaction behavior or explicit BEGIN is fine.
+            # The `with self.get_connection() as conn:` pattern also manages transactions well if used consistently.
+            # However, to be absolutely explicit as per re-implementation request:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN") # Start transaction explicitly
 
-                # Get column_id
-                cursor.execute("SELECT id FROM columns WHERE name = ?", (column_name,))
-                column_row = cursor.fetchone()
-                if not column_row:
-                    logger.warning(f"Column '{column_name}' not found. Cannot update entity '{frame_name}'.")
-                    return False
-                column_id = column_row['id']
+            # Get column_id
+            cursor.execute("SELECT id FROM columns WHERE name = ?", (column_name,))
+            column_row = cursor.fetchone()
+            if not column_row:
+                logger.warning(f"Column '{column_name}' not found. Cannot update entity '{frame_name}'.")
+                conn.rollback() # Rollback before returning
+                return False
+            column_id = column_row['id']
 
-                # Construct SET part of the query
-                set_clauses = []
-                params = []
-                
-                if 'properties' in data:
-                    set_clauses.append("properties = ?")
-                    params.append(json.dumps(data['properties']))
-                
-                if 'relationships' in data:
-                    set_clauses.append("relationships = ?")
-                    params.append(json.dumps(data['relationships']))
+            set_clauses = []
+            params = []
 
-                if 'location' in data:
-                    set_clauses.append("location = ?")
-                    params.append(json.dumps(data['location']))
-                
-                if not set_clauses:
-                    logger.info(f"No data provided to update for entity '{frame_name}' in column '{column_name}'.")
-                    # Still update updated_at
-                    set_clauses.append("updated_at = ?")
-                    params.append(datetime.now().isoformat())
-                else:
-                    set_clauses.append("updated_at = ?")
-                    params.append(datetime.now().isoformat())
+            if 'properties' in data and data['properties'] is not None: # Check for None too
+                set_clauses.append("properties = ?")
+                params.append(json.dumps(data['properties']))
 
-                sql_query = f"UPDATE frames SET {', '.join(set_clauses)} WHERE column_id = ? AND name = ?"
-                params.extend([column_id, frame_name])
+            if 'relationships' in data and data['relationships'] is not None: # Check for None too
+                set_clauses.append("relationships = ?")
+                params.append(json.dumps(data['relationships']))
 
-                cursor.execute(sql_query, tuple(params))
+            if 'location' in data and data['location'] is not None: # Check for None too
+                set_clauses.append("location = ?")
+                params.append(json.dumps(data['location']))
+
+            # Always include updated_at
+            set_clauses.append("updated_at = ?")
+            params.append(datetime.now().isoformat())
+
+            if not set_clauses:
+                # This case should ideally not be reached if updated_at is always added.
+                # However, if logic changes and updated_at might not be added, this is a safe log.
+                logger.info(f"No specific fields to update for entity '{frame_name}' in column '{column_name}', only 'updated_at'.")
+                # If set_clauses is truly empty (e.g. only updated_at was intended and somehow removed),
+                # then the query might be invalid. But `updated_at` is always added.
+                # This condition effectively means 'properties', 'relationships', 'location' were not in data.
+
+            # Only proceed if there's something to set (updated_at is always there)
+            query_set_string = ", ".join(set_clauses)
+            sql_query = f"UPDATE frames SET {query_set_string} WHERE column_id = ? AND name = ?"
+            params.extend([column_id, frame_name])
+
+            cursor.execute(sql_query, tuple(params))
+
+            if cursor.rowcount > 0:
                 conn.commit()
-
-                if cursor.rowcount > 0:
-                    logger.info(f"Successfully updated entity '{frame_name}' in column '{column_name}'.")
-                    return True
-                else:
-                    logger.warning(f"Entity '{frame_name}' in column '{column_name}' not found or no changes made.")
-                    return False
+                logger.info(f"Successfully updated entity '{frame_name}' in column '{column_name}'.")
+                return True
+            else:
+                # No rows updated - could be due to frame not found or data being identical (though updated_at should make it different)
+                conn.rollback() # Rollback, as no change was effectively made or target not found
+                logger.warning(f"Entity '{frame_name}' in column '{column_name}' not found or no changes required resulting in update.")
+                return False
 
         except sqlite3.Error as e:
+            if conn:
+                conn.rollback()
             logger.error(f"SQLite error updating entity '{frame_name}' in column '{column_name}': {e}")
-            # conn.rollback() # Not needed as context manager handles it
             return False
-        except Exception as e:
+        except Exception as e: # Catch other potential errors, e.g. json.dumps issues if data is exotic
+            if conn:
+                conn.rollback()
             logger.error(f"Unexpected error updating entity '{frame_name}' in column '{column_name}': {e}")
             return False
+        finally:
+            if conn:
+                conn.close() # Ensure connection is closed if not using 'with' for its management
